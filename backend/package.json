@@ -1,0 +1,27 @@
+{
+  "name": "yulo-backend",
+  "version": "1.0.0",
+  "description": "Backend automation for Yulo vaults",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.30.0",
+    "@pythnetwork/pyth-sdk-js": "^1.0.0",
+    "@supabase/supabase-js": "^2.39.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "node-cron": "^3.0.3",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

@@ -1,83 +1,136 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
-
-const navigation = [
-  { name: 'Vaults', href: '#vaults' },
-  { name: 'Docs', href: '#' },
-  { name: 'Analytics', href: '#' },
-  { name: 'Community', href: '#' },
-];
+import { Link } from 'react-router-dom';
+import { Bars3Icon, XMarkIcon, WalletIcon } from '@heroicons/react/24/outline';
+import { useWallet } from '../contexts/WalletContext';
+import WalletModal from './WalletModal';
 
 export default function Navbar(): JSX.Element {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
+  const { isConnected, address, disconnect } = useWallet();
+
+  const navigation = [
+    { name: 'Home', href: '/' },
+    { name: 'Vaults', href: '/vaults' },
+    { name: 'Profile', href: '/profile' },
+  ];
 
   return (
-    <header className="bg-transparent">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between p-6 lg:px-8" aria-label="Global">
-        <div className="flex lg:flex-1">
-          <a href="#" className="-m-1.5 p-1.5 flex items-center">
-            <span className="sr-only">Yulo</span>
-            <span className="text-2xl font-bold text-white tracking-tight">Yulo</span>
-          </a>
-        </div>
-        <div className="flex lg:hidden">
-          <button
-            type="button"
-            className="inline-flex items-center justify-center rounded-md p-2.5 text-gray-400 hover:text-white focus:outline-none"
-            onClick={() => setMobileMenuOpen(true)}
-          >
-            <span className="sr-only">Open main menu</span>
-            <Bars3Icon className="h-6 w-6" aria-hidden="true" />
-          </button>
-        </div>
-        <div className="hidden lg:flex lg:gap-x-12">
-          {navigation.map((item) => (
-            <a key={item.name} href={item.href} className="text-sm font-semibold leading-6 text-gray-300 hover:text-white">
-              {item.name}
-            </a>
-          ))}
-        </div>
-      </nav>
-      {/* Mobile menu */}
-      {mobileMenuOpen && (
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -20 }}
-          className="lg:hidden fixed inset-0 z-50 bg-gray-900 bg-opacity-95 p-6"
-        >
-          <div className="flex items-center justify-between">
-            <a href="#" className="-m-1.5 p-1.5 flex items-center">
-              <span className="sr-only">Yulo</span>
-              <span className="text-2xl font-bold text-white tracking-tight">Yulo</span>
-            </a>
-            <button
-              type="button"
-              className="rounded-md p-2.5 text-gray-400 hover:text-white focus:outline-none"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              <span className="sr-only">Close menu</span>
-              <XMarkIcon className="h-6 w-6" aria-hidden="true" />
-            </button>
-          </div>
-          <div className="mt-6 flow-root">
-            <div className="-my-6 divide-y divide-gray-500/10">
-              <div className="space-y-2 py-6">
-                {navigation.map((item) => (
-                  <a
-                    key={item.name}
-                    href={item.href}
-                    className="-mx-3 block rounded-lg py-2 px-3 text-base font-semibold leading-7 text-gray-300 hover:text-white hover:bg-gray-800"
-                  >
-                    {item.name}
-                  </a>
-                ))}
+    <>
+      <nav className="bg-gray-800/50 backdrop-blur-lg fixed w-full z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center">
+              <Link to="/" className="flex-shrink-0">
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.5 }}
+                  className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent"
+                >
+                  YULO
+                </motion.div>
+              </Link>
+              <div className="hidden md:block">
+                <div className="ml-10 flex items-baseline space-x-4">
+                  {navigation.map((item) => (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                    >
+                      {item.name}
+                    </Link>
+                  ))}
+                </div>
               </div>
             </div>
+            <div className="hidden md:block">
+              {isConnected ? (
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-2 text-gray-300">
+                    <WalletIcon className="h-5 w-5" />
+                    <span>{address}</span>
+                  </div>
+                  <button
+                    onClick={disconnect}
+                    className="bg-red-500 text-white px-4 py-2 rounded-lg font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsWalletModalOpen(true)}
+                  className="bg-gradient-to-r from-blue-500 to-purple-500 text-white px-4 py-2 rounded-lg font-semibold hover:opacity-90 transition-opacity"
+                >
+                  Connect Wallet
+                </button>
+              )}
+            </div>
+            <div className="md:hidden">
+              <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="text-gray-400 hover:text-white"
+              >
+                {isOpen ? (
+                  <XMarkIcon className="h-6 w-6" />
+                ) : (
+                  <Bars3Icon className="h-6 w-6" />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile menu */}
+        <motion.div
+          initial={false}
+          animate={{ height: isOpen ? 'auto' : 0 }}
+          transition={{ duration: 0.3 }}
+          className="md:hidden overflow-hidden"
+        >
+          <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+            {navigation.map((item) => (
+              <Link
+                key={item.name}
+                to={item.href}
+                className="text-gray-300 hover:text-white block px-3 py-2 rounded-md text-base font-medium"
+                onClick={() => setIsOpen(false)}
+              >
+                {item.name}
+              </Link>
+            ))}
+            {isConnected ? (
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2 text-gray-300 px-3 py-2">
+                  <WalletIcon className="h-5 w-5" />
+                  <span>{address}</span>
+                </div>
+                <button
+                  onClick={disconnect}
+                  className="w-full bg-red-500 text-white px-4 py-2 rounded-lg font-semibold hover:opacity-90 transition-opacity"
+                >
+                  Disconnect
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsWalletModalOpen(true)}
+                className="w-full bg-gradient-to-r from-blue-500 to-purple-500 text-white px-4 py-2 rounded-lg font-semibold hover:opacity-90 transition-opacity"
+              >
+                Connect Wallet
+              </button>
+            )}
           </div>
         </motion.div>
-      )}
-    </header>
+      </nav>
+
+      <WalletModal
+        isOpen={isWalletModalOpen}
+        onClose={() => setIsWalletModalOpen(false)}
+      />
+    </>
   );
 } 

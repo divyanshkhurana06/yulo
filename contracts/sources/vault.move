@@ -8,6 +8,7 @@ module yulo::vault {
     use sui::table::{Self, Table};
     use sui::vec_map::{Self, VecMap};
     use sui::clock::{Self, Clock};
+    use sui::bag::{Self, Bag};
 
     // ===== Errors =====
     const ENotEnoughBalance: u64 = 0;
@@ -18,6 +19,18 @@ module yulo::vault {
     const EWithdrawLimitExceeded: u64 = 5;
     const EInvalidToken: u64 = 6;
     const EReentrancyGuard: u64 = 7;
+    const EVaultPaused: u64 = 8;
+    const EInvalidOperation: u64 = 9;
+    const EMaxStrategiesReached: u64 = 10;
+    const EStrategyAlreadyExists: u64 = 11;
+    const EInvalidFee: u64 = 12;
+
+    // ===== Constants =====
+    const MAX_STRATEGIES: u64 = 10;
+    const MAX_PERFORMANCE_FEE: u64 = 2000; // 20%
+    const MAX_WITHDRAWAL_FEE: u64 = 100;   // 1%
+    const MIN_DEPOSIT: u64 = 1;
+    const MIN_WITHDRAW: u64 = 1;
 
     // ===== Events =====
     struct DepositEvent has copy, drop {
@@ -40,6 +53,14 @@ module yulo::vault {
         timestamp: u64,
     }
 
+    struct VaultPausedEvent has copy, drop {
+        timestamp: u64,
+    }
+
+    struct VaultUnpausedEvent has copy, drop {
+        timestamp: u64,
+    }
+
     // ===== Structs =====
     struct Vault has key {
         id: UID,
@@ -52,6 +73,9 @@ module yulo::vault {
         withdraw_limit: u64,
         last_operation: u64,
         clock: Clock,
+        paused: bool,
+        admin_cap: AdminCap,
+        emergency_withdrawals: Bag,
     }
 
     struct Strategy has store {
@@ -60,6 +84,11 @@ module yulo::vault {
         last_harvest: u64,
         performance_fee: u64, // in basis points (1 = 0.01%)
         withdrawal_fee: u64,  // in basis points
+        active: bool,
+    }
+
+    struct AdminCap has key {
+        id: UID,
     }
 
     // ===== Functions =====
@@ -70,6 +99,10 @@ module yulo::vault {
         clock: Clock,
         ctx: &mut TxContext
     ) {
+        let admin_cap = AdminCap {
+            id: object::new(ctx)
+        };
+
         let vault = Vault {
             id: object::new(ctx),
             total_supply: 0,
@@ -81,9 +114,13 @@ module yulo::vault {
             withdraw_limit,
             last_operation: 0,
             clock,
+            paused: false,
+            admin_cap,
+            emergency_withdrawals: bag::empty(),
         };
 
         transfer::share_object(vault);
+        transfer::transfer(admin_cap, tx_context::sender(ctx));
     }
 
     public fun deposit<T>(
@@ -91,13 +128,16 @@ module yulo::vault {
         coins: Coin<T>,
         ctx: &mut TxContext
     ) {
+        // Check if vault is paused
+        assert!(!vault.paused, EVaultPaused);
+
         // Reentrancy guard
         let current_time = clock::timestamp_ms(&vault.clock);
         assert!(current_time > vault.last_operation, EReentrancyGuard);
         vault.last_operation = current_time;
 
         let amount = coin::value(&coins);
-        assert!(amount > 0, EInvalidAmount);
+        assert!(amount >= MIN_DEPOSIT, EInvalidAmount);
         assert!(amount <= vault.deposit_limit, EDepositLimitExceeded);
 
         // Calculate shares to mint
@@ -133,13 +173,16 @@ module yulo::vault {
         shares: Coin<YULO>,
         ctx: &mut TxContext
     ) {
+        // Check if vault is paused
+        assert!(!vault.paused, EVaultPaused);
+
         // Reentrancy guard
         let current_time = clock::timestamp_ms(&vault.clock);
         assert!(current_time > vault.last_operation, EReentrancyGuard);
         vault.last_operation = current_time;
 
         let share_amount = coin::value(&shares);
-        assert!(share_amount > 0, EInvalidAmount);
+        assert!(share_amount >= MIN_WITHDRAW, EInvalidAmount);
         assert!(share_amount <= vault.total_supply, ENotEnoughBalance);
 
         // Calculate withdrawal amount
@@ -169,12 +212,22 @@ module yulo::vault {
 
     public fun add_strategy(
         vault: &mut Vault,
+        admin_cap: &AdminCap,
         strategy_address: address,
         performance_fee: u64,
         withdrawal_fee: u64,
         ctx: &TxContext
     ) {
-        assert!(tx_context::sender(ctx) == object::id(&vault.id), ENotAuthorized);
+        // Verify admin
+        assert!(object::id(&admin_cap.id) == object::id(&vault.admin_cap.id), ENotAuthorized);
+        
+        // Check strategy limits
+        assert!(vec_map::length(&vault.strategies) < MAX_STRATEGIES, EMaxStrategiesReached);
+        assert!(!vec_map::contains(&vault.strategies, strategy_address), EStrategyAlreadyExists);
+        
+        // Validate fees
+        assert!(performance_fee <= MAX_PERFORMANCE_FEE, EInvalidFee);
+        assert!(withdrawal_fee <= MAX_WITHDRAWAL_FEE, EInvalidFee);
         
         let strategy = Strategy {
             address: strategy_address,
@@ -182,6 +235,7 @@ module yulo::vault {
             last_harvest: 0,
             performance_fee,
             withdrawal_fee,
+            active: true,
         };
 
         vec_map::insert(&mut vault.strategies, strategy_address, strategy);
@@ -193,6 +247,9 @@ module yulo::vault {
         rewards: Coin<SUI>,
         ctx: &mut TxContext
     ) {
+        // Check if vault is paused
+        assert!(!vault.paused, EVaultPaused);
+
         // Reentrancy guard
         let current_time = clock::timestamp_ms(&vault.clock);
         assert!(current_time > vault.last_operation, EReentrancyGuard);
@@ -200,6 +257,7 @@ module yulo::vault {
 
         let strategy = vec_map::get_mut(&mut vault.strategies, strategy_address);
         assert!(strategy.address == strategy_address, EStrategyNotFound);
+        assert!(strategy.active, EInvalidOperation);
 
         let amount = coin::value(&rewards);
         let performance_fee = (amount * strategy.performance_fee) / 10000;
@@ -224,6 +282,49 @@ module yulo::vault {
         });
     }
 
+    public fun pause_vault(
+        vault: &mut Vault,
+        admin_cap: &AdminCap,
+        ctx: &TxContext
+    ) {
+        assert!(object::id(&admin_cap.id) == object::id(&vault.admin_cap.id), ENotAuthorized);
+        assert!(!vault.paused, EVaultPaused);
+        
+        vault.paused = true;
+        event::emit(VaultPausedEvent {
+            timestamp: clock::timestamp_ms(&vault.clock),
+        });
+    }
+
+    public fun unpause_vault(
+        vault: &mut Vault,
+        admin_cap: &AdminCap,
+        ctx: &TxContext
+    ) {
+        assert!(object::id(&admin_cap.id) == object::id(&vault.admin_cap.id), ENotAuthorized);
+        assert!(vault.paused, EVaultPaused);
+        
+        vault.paused = false;
+        event::emit(VaultUnpausedEvent {
+            timestamp: clock::timestamp_ms(&vault.clock),
+        });
+    }
+
+    public fun emergency_withdraw(
+        vault: &mut Vault,
+        admin_cap: &AdminCap,
+        ctx: &mut TxContext
+    ) {
+        assert!(object::id(&admin_cap.id) == object::id(&vault.admin_cap.id), ENotAuthorized);
+        assert!(vault.paused, EVaultPaused);
+        
+        let amount = balance::value(&vault.fees);
+        if (amount > 0) {
+            let coins = coin::from_balance(balance::split(&mut vault.fees, amount), ctx);
+            bag::add(&mut vault.emergency_withdrawals, coins);
+        }
+    }
+
     // ===== View Functions =====
     public fun get_total_assets(vault: &Vault): u64 {
         vault.total_assets
@@ -239,5 +340,13 @@ module yulo::vault {
 
     public fun get_withdraw_limit(vault: &Vault): u64 {
         vault.withdraw_limit
+    }
+
+    public fun is_paused(vault: &Vault): bool {
+        vault.paused
+    }
+
+    public fun get_strategy_count(vault: &Vault): u64 {
+        vec_map::length(&vault.strategies)
     }
 } 
